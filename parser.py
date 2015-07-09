@@ -23,10 +23,7 @@ Explanation for parameters in GPGGA raw GPS output:
 https://www.u-blox.com/images/downloads/Product_Docs/GPS_Compendium%28GPS-X-02007%29.pdf
 '''
 
-import argparse
-import serial, sys, os
-import winreg as winreg
-import itertools
+import serial, sys, os, argparse, itertools, winreg
 
 def main(args):
     # Figure out COM port number to listen on:
@@ -71,25 +68,23 @@ def main(args):
     print('Collecting', n_base_readings, 'base readings to establish ground altitude.')
     base_readings = []
     for base_reading in range(n_base_readings):
-        print('Base reading {:02d}/{}... '.format(base_reading + 1, n_base_readings), end='')
         GPGGA = get_GPGGA(ser)
         geoid_altitude = get_geoid_altitude(GPGGA)
         base_readings.append(geoid_altitude)
         n_satelites = get_n_satelites(GPGGA)
-        GPS_quality = get_GPS_quality(GPGGA)
-        print(GPS_quality, end = ' ')
+        print('Base reading {:02d}/{}... '.format(base_reading + 1, n_base_readings), end='')
         print('Sat:', n_satelites, end = ', ')
-        print('Ground altitude:', geoid_altitude)
+        print('Ground altitude:', geoid_altitude, 'm')
 
     # Average the ground altitude measurements:
     base_altitude_avg = sum(base_readings) / len(base_readings)
-    print('\nGround altitude average set to', round(base_altitude_avg, 2))
+    print('\nGround altitude average set to', round(base_altitude_avg, 2), 'm')
 
     # Sample standard deviation for ground altitude measurements:
     var = sum((base_reading - base_altitude_avg) ** 2 for base_reading in base_readings) / (len(base_readings) - 1)
     std_dev = var ** 0.5
-    print('Sample variance:', round(var, 3))
-    print('Sample standard deviation:', round(std_dev, 3), '\n')
+    print('Sample variance:', round(var, 3), 'm^2')
+    print('Sample standard deviation:', round(std_dev, 3), 'm', '\n')
 
     # Start outputting relative altitudes:
     print('Program is ready for flight.')
@@ -97,14 +92,12 @@ def main(args):
         GPGGA = get_GPGGA(ser)
         geoid_altitude = get_geoid_altitude(GPGGA)
         n_satelites = get_n_satelites(GPGGA)
-        GPS_quality = get_GPS_quality(GPGGA)
 
         rel_altitude = geoid_altitude - base_altitude_avg
         rel_altitude = round(rel_altitude, 2)
 
-        print(GPS_quality, end = ' ')
         print('Sat:', n_satelites, end = ', ')
-        print('Relative altitude:', rel_altitude)
+        print('Relative altitude:', rel_altitude, 'm')
 
 def enumerate_serial_ports():
     """ Uses the Win32 registry to return an
@@ -131,17 +124,6 @@ def get_geoid_altitude(GPGGA):
         print('Alert! Output from GPS was not as expected! Altitude was not given in meters, the unit was:', unit)
     return geoid_altitude
 
-def get_GPS_quality(GPGGA):
-    GPS_quality = GPGGA[6] # GPS quality details (0= no GPS, 1= GPS, 2=DGPS)
-    if GPS_quality == '0':
-        return 'No GPS'
-    elif GPS_quality == '1':
-        return 'GPS   '
-    elif GPS_quality == '2':
-        return 'DGPS  '
-    else:
-        return 'Error '
-
 def get_n_satelites(GPGGA):
     n_satelites = GPGGA[7]
     return n_satelites
@@ -149,11 +131,39 @@ def get_n_satelites(GPGGA):
 def get_GPGGA(ser):
     # Read from the raw GPS output, and find the GPGGA line.
     while True:
-        line = ser.readline()
+        line = ser.readline().strip()
         line_dec = line.decode('utf-8')
         if line_dec[0:6] == '$GPGGA':
-            line_split = line_dec.split(',')
-            return line_split
+            ### Validate checksum (see the pdf linked at the top) ###
+            try:
+                # Get stuff inbetween $ and *
+                trimmed = line_dec[1:]
+                data, checksum = trimmed.split('*')
+                c = 0
+                for char in data:
+                    # XOR:
+                    c = c ^ ord(char)
+                nibble1 = c // 2 ** 4
+                nibble2 = c % 2 ** 4
+
+                checkhex1 = hex(nibble1)[-1]
+                checkhex2 = hex(nibble2)[-1]
+
+                if checkhex1.lower() == checksum[0].lower() and checkhex2.lower() == checksum[1].lower():
+                    ### Validate that there is a GPS signal ###
+                    GPGGA_list = line_dec.split(',')
+                    GPS_quality = GPGGA_list[6]
+                    if GPS_quality == '1' or GPS_quality == '2':
+                        ### Return ###
+                        return GPGGA_list
+                    else:
+                        print('No GPS signal.')
+                else:
+                    print('Received incorrect data. Weak signal.')
+            except:
+                print('Received incorrect data. Weak signal.')
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Display relative altitude from u-blox GPS module.')
@@ -171,3 +181,4 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     main(args)
+
