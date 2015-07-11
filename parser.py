@@ -58,8 +58,9 @@ def main(args):
     port -= 1
     try:
         ser = serial.Serial(port=port, baudrate=9600)
-    except:
+    except Exception as e:
         print('Error: Could not connect to COM port.')
+        print(type(e))
         return
 
     n_base_readings = int(args.ground_measurements)
@@ -132,8 +133,18 @@ def get_n_satelites(GPGGA):
 def get_GPGGA(ser):
     # Read from the raw GPS output, and find the GPGGA line.
     while True:
-        line = ser.readline().strip()
-        line_dec = line.decode('utf-8')
+        try:
+            line = ser.readline().strip()
+        except Exception as e:
+            print('Failed to read from COM port.')
+            print(type(e))
+            continue
+        try:
+            line_dec = line.decode('utf-8')
+        except Exception as e:
+            print('Failed to decode bytestring.')
+            print(type(e))
+            continue
         if line_dec[0:6] == '$GPGGA':
             ### Validate checksum (see the pdf linked at the top) ###
             try:
@@ -161,10 +172,9 @@ def get_GPGGA(ser):
                         print('No GPS signal.')
                 else:
                     print('Received incorrect data. Weak signal.')
-            except:
-                print('Received incorrect data. Weak signal.')
-
-
+            except Exception as e:
+                print('Received corrupt data. Weak signal.')
+                print(type(e))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Display relative altitude from u-blox GPS module.')
