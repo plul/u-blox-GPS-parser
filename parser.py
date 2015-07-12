@@ -24,82 +24,13 @@ Explanation for parameters in GPGGA raw GPS output:
 https://www.u-blox.com/images/downloads/Product_Docs/GPS_Compendium%28GPS-X-02007%29.pdf
 '''
 
-import serial, sys, os, argparse, itertools, winreg
-
-def main(args):
-    # Figure out COM port number to listen on:
-    if args.com_port != None:
-        port = int(args.com_port)
-    else:
-        print('Listing available COM ports:\n')
-        # Get available COM ports from registry:
-        com_ports = list(enumerate_serial_ports())
-
-        # Present user with com ports found in the registry:
-        n_com_ports = 0
-        for com_port in com_ports:
-            print(com_port)
-            n_com_ports += 1
-
-        # If only one is found, that one is suggested as the deafult one
-        if n_com_ports == 1:
-            default_port = com_ports[0]
-            default_port = int(default_port[3]) # grab the integer from 'COMx'
-            user_input = input('\nSpecify COM port to use (as integer) or press ENTER to use port {}: '.format(default_port))
-            if user_input == '':
-                port = default_port
-            else:
-                port = int(user_input)
-        else:
-            user_input = input('\nSpecify COM port to use (as integer): ')
-            port = int(user_input)
-
-    # COM ports in Windows are 1-indexed but in Python they are 0-indexed:
-    port -= 1
-    try:
-        ser = serial.Serial(port=port, baudrate=9600)
-    except Exception as e:
-        print('Error: Could not connect to COM port.')
-        print(type(e))
-        return
-
-    n_base_readings = int(args.ground_measurements)
-
-    # Collect measurements at ground level:
-    print('\nData is altitude data (geoid altitude)')
-    print('Collecting', n_base_readings, 'base readings to establish ground altitude.')
-    base_readings = []
-    for base_reading in range(n_base_readings):
-        GPGGA = get_GPGGA(ser)
-        geoid_altitude = get_geoid_altitude(GPGGA)
-        base_readings.append(geoid_altitude)
-        n_satelites = get_n_satelites(GPGGA)
-        print('Base reading {:02d}/{}... '.format(base_reading + 1, n_base_readings), end='')
-        print('Sat:', n_satelites, end = ', ')
-        print('Ground altitude:', geoid_altitude, 'm')
-
-    # Average the ground altitude measurements:
-    base_altitude_avg = sum(base_readings) / len(base_readings)
-    print('\nGround altitude average set to', round(base_altitude_avg, 2), 'm')
-
-    # Sample standard deviation for ground altitude measurements:
-    var = sum((base_reading - base_altitude_avg) ** 2 for base_reading in base_readings) / (len(base_readings) - 1)
-    std_dev = var ** 0.5
-    print('Sample variance:', round(var, 3), 'm^2')
-    print('Sample standard deviation:', round(std_dev, 3), 'm', '\n')
-
-    # Start outputting relative altitudes:
-    print('Program is ready for flight.')
-    while True:
-        GPGGA = get_GPGGA(ser)
-        geoid_altitude = get_geoid_altitude(GPGGA)
-        n_satelites = get_n_satelites(GPGGA)
-
-        rel_altitude = geoid_altitude - base_altitude_avg
-        rel_altitude = round(rel_altitude, 2)
-
-        print('Sat:', n_satelites, end = ', ')
-        print('Relative altitude:', rel_altitude, 'm')
+import serial
+import sys
+import os
+import argparse
+import itertools
+import winreg
+import time
 
 def enumerate_serial_ports():
     """ Uses the Win32 registry to return an
@@ -123,7 +54,7 @@ def get_geoid_altitude(GPGGA):
     geoid_altitude = float(GPGGA[9])
     unit = GPGGA[10]
     if unit != 'M':
-        print('Alert! Output from GPS was not as expected! Altitude was not given in meters, the unit was:', unit)
+        print_and_log('Alert! Output from GPS was not as expected! Altitude was not given in meters, the unit was:', unit)
     return geoid_altitude
 
 def get_n_satelites(GPGGA):
@@ -136,14 +67,12 @@ def get_GPGGA(ser):
         try:
             line = ser.readline().strip()
         except Exception as e:
-            print('Failed to read from COM port.')
-            print(type(e))
+            print_and_log('Failed to read from COM port.')
             continue
         try:
             line_dec = line.decode('utf-8')
         except Exception as e:
-            print('Failed to decode bytestring.')
-            print(type(e))
+            print_and_log('Failed to decode bytestring.')
             continue
         if line_dec[0:6] == '$GPGGA':
             ### Validate checksum (see the pdf linked at the top) ###
@@ -169,27 +98,108 @@ def get_GPGGA(ser):
                         ### Return ###
                         return GPGGA_list
                     else:
-                        print('No GPS signal.')
+                        print_and_log('No GPS signal.')
                 else:
-                    print('Received incorrect data. Weak signal.')
+                    print_and_log('Received corrupt data. Weak signal.')
             except Exception as e:
-                print('Received corrupt data. Weak signal.')
-                print(type(e))
+                print_and_log('Received corrupt data. Weak signal.')
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Display relative altitude from u-blox GPS module.')
-    parser.add_argument(
-        '-p',
-        dest='com_port',
-        action='store',
-        help='COM port to listen on.')
-    parser.add_argument(
-        '-g',
-        dest='ground_measurements',
-        default='50',
-        action='store',
-        help='Number of readings for ground altitude.')
+def print_and_log(*args, **kwargs):
+    print(*args, **kwargs)
+    if not os.path.exists(log_folder):
+        os.makedirs(log_folder)
+    with open(log, 'a') as f:
+        print(*args, file=f, **kwargs)
 
-    args = parser.parse_args()
-    main(args)
+parser = argparse.ArgumentParser(description='Display relative altitude from u-blox GPS module.')
+parser.add_argument(
+    '-p',
+    dest='com_port',
+    action='store',
+    help='COM port to listen on.')
+parser.add_argument(
+    '-g',
+    dest='ground_measurements',
+    default='50',
+    action='store',
+    help='Number of readings for ground altitude.')
+args = parser.parse_args()
 
+# Logging output to a file
+script_dir = os.path.dirname(os.path.realpath(__file__))
+log_filename = str(time.time()) + '.txt'
+log_folder = os.path.join(script_dir, 'logs')
+log = os.path.join(log_folder, log_filename)
+
+# Figure out COM port number to listen on:
+if args.com_port != None:
+    port = int(args.com_port)
+else:
+    print_and_log('Listing available COM ports:\n')
+    # Get available COM ports from registry:
+    com_ports = list(enumerate_serial_ports())
+
+    # Present user with com ports found in the registry:
+    n_com_ports = 0
+    for com_port in com_ports:
+        print_and_log(com_port)
+        n_com_ports += 1
+
+    # If only one is found, that one is suggested as the deafult one
+    if n_com_ports == 1:
+        default_port = com_ports[0]
+        default_port = int(default_port[3]) # grab the integer from 'COMx'
+        user_input = input('\nSpecify COM port to use (as integer) or press ENTER to use port {}: '.format(default_port))
+        if user_input == '':
+            port = default_port
+        else:
+            port = int(user_input)
+    else:
+        user_input = input('\nSpecify COM port to use (as integer): ')
+        port = int(user_input)
+
+# COM ports in Windows are 1-indexed but in Python they are 0-indexed:
+port -= 1
+try:
+    ser = serial.Serial(port=port, baudrate=9600)
+except Exception as e:
+    print_and_log('Error: Could not connect to COM port.')
+    return
+
+n_base_readings = int(args.ground_measurements)
+
+# Collect measurements at ground level:
+print_and_log('\nData is altitude data (geoid altitude)')
+print_and_log('Collecting', n_base_readings, 'base readings to establish ground altitude.')
+base_readings = []
+for base_reading in range(n_base_readings):
+    GPGGA = get_GPGGA(ser)
+    geoid_altitude = get_geoid_altitude(GPGGA)
+    base_readings.append(geoid_altitude)
+    n_satelites = get_n_satelites(GPGGA)
+    print_and_log('Base reading {:02d}/{}... '.format(base_reading + 1, n_base_readings), end='')
+    print_and_log('Sat:', n_satelites, end = ', ')
+    print_and_log('Ground altitude:', geoid_altitude, 'm')
+
+# Average the ground altitude measurements:
+base_altitude_avg = sum(base_readings) / len(base_readings)
+print_and_log('\nGround altitude average set to', round(base_altitude_avg, 2), 'm')
+
+# Sample standard deviation for ground altitude measurements:
+var = sum((base_reading - base_altitude_avg) ** 2 for base_reading in base_readings) / (len(base_readings) - 1)
+std_dev = var ** 0.5
+print_and_log('Sample variance:', round(var, 3), 'm^2')
+print_and_log('Sample standard deviation:', round(std_dev, 3), 'm', '\n')
+
+# Start outputting relative altitudes:
+print_and_log('Program is ready for flight.')
+while True:
+    GPGGA = get_GPGGA(ser)
+    geoid_altitude = get_geoid_altitude(GPGGA)
+    n_satelites = get_n_satelites(GPGGA)
+
+    rel_altitude = geoid_altitude - base_altitude_avg
+    rel_altitude = round(rel_altitude, 2)
+
+    print_and_log('Sat:', n_satelites, end = ', ')
+    print_and_log('Relative altitude:', rel_altitude, 'm')
