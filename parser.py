@@ -17,7 +17,7 @@ If nothing is received from the GPS, the program will probably hang.
 Optional arguments:
   -h, --help            show this help message and exit
   -p PORT, --port PORT  COM port to listen on.
-  -b N_BASE_READINGS, --base_readings N_BASE_READINGS
+  -g N_BASE_READINGS, --base_readings N_BASE_READINGS
                         Number of readings for ground altitude.
 
 Explanation for parameters in GPGGA raw GPS output:
