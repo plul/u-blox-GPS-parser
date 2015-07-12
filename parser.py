@@ -164,7 +164,7 @@ try:
     ser = serial.Serial(port=port, baudrate=9600)
 except Exception as e:
     print_and_log('Error: Could not connect to COM port.')
-    return
+    sys.exit()
 
 n_base_readings = int(args.ground_measurements)
 
