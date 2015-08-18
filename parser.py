@@ -41,7 +41,7 @@ def enumerate_serial_ports():
     try:
         key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
     except WindowsError:
-        raise IterationError
+        return
 
     for i in itertools.count():
         try:
@@ -135,26 +135,31 @@ log = os.path.join(log_folder, log_filename)
 if args.com_port != None:
     port = int(args.com_port)
 else:
-    print_and_log('Listing available COM ports:\n')
     # Get available COM ports from registry:
     com_ports = list(enumerate_serial_ports())
 
-    # Present user with com ports found in the registry:
-    n_com_ports = 0
-    for com_port in com_ports:
-        print_and_log(com_port)
-        n_com_ports += 1
+    if com_ports:
+        # Present user with com ports found in the registry:
+        print_and_log('Listing available COM ports:\n')
+        n_com_ports = 0
+        for com_port in com_ports:
+            print_and_log(com_port)
+            n_com_ports += 1
 
-    # If only one is found, that one is suggested as the deafult one
-    if n_com_ports == 1:
-        default_port = com_ports[0]
-        default_port = int(default_port[3]) # grab the integer from 'COMx'
-        user_input = input('\nSpecify COM port to use (as integer) or press ENTER to use port {}: '.format(default_port))
-        if user_input == '':
-            port = default_port
+        # If only one is found, that one is suggested as the deafult one
+        if n_com_ports == 1:
+            default_port = com_ports[0]
+            default_port = int(default_port[3]) # grab the integer from 'COMx'
+            user_input = input('\nSpecify COM port to use (as integer) or press ENTER to use port {}: '.format(default_port))
+            if user_input == '':
+                port = default_port
+            else:
+                port = int(user_input)
         else:
+            user_input = input('\nSpecify COM port to use (as integer): ')
             port = int(user_input)
     else:
+        print_and_log('No active COM ports found in registry.')
         user_input = input('\nSpecify COM port to use (as integer): ')
         port = int(user_input)
 
